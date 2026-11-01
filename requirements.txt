@@ -3,3 +3,4 @@ kubernetes-validate>=1.34.0
 yamllint>=1.35
 pillow>=10.0
 pytest>=8.0
+matplotlib>=3.8

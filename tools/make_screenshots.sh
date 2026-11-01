@@ -33,4 +33,11 @@ $PY tools/validate.py "$OLD_K8S" > out/validate_old.txt || true
   echo "\$ python3 tools/validate.py $OLD_K8S | grep ResourceClaimTemplate"; grep ResourceClaimTemplate out/validate_old.txt; } \
   | $PY tools/render.py docs/img/ss4-offline-schema-validation.png "$TITLE"
 
-echo "wrote docs/img/ss1..ss4 from real tool output (raw text is in out/)"
+$PY tools/routesim.py --lam 80 --stale 2.0 > out/routesim80_stale2.txt
+{ echo '$ python3 tools/routesim.py --lam 80 --stale 2.0   # router sees 2-second-old metrics'; sed -n '1,10p' out/routesim80_stale2.txt; } \
+  | $PY tools/render.py docs/img/ss5-stale-metrics.png "$TITLE"
+
+{ echo '$ make lint test'; make lint test 2>&1; } \
+  | $PY tools/render.py docs/img/ss6-lint-and-tests.png "$TITLE"
+
+echo "wrote docs/img/ss1..ss6 from real tool output (raw text is in out/)"
