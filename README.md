@@ -1,5 +1,7 @@
 # LLM inference on Kubernetes: configs, calculators and a routing simulator
 
+[![CI](https://github.com/Bilalkhanten/llm-inference-on-kubernetes/actions/workflows/ci.yml/badge.svg)](https://github.com/Bilalkhanten/llm-inference-on-kubernetes/actions/workflows/ci.yml)
+
 Companion code for the article **"I Stopped Lying to the Kubernetes Scheduler About My GPUs"**
 (DRA, KV-cache math, inference-aware routing and autoscaling that respects a long cold start).
 
@@ -120,7 +122,25 @@ kubectl apply -k manifests/
 
 ## CI
 
-`.github/workflows/ci.yml` runs `make lint`, `make validate`, `make test` and `make all` on every push and pull request.
+`.github/workflows/ci.yml` runs on every push and pull request as a dependency graph (arrows are `needs:`):
+
+```
+lint ──┬──▶ validate (Kubernetes 1.34 - 1.37) ──┐
+       ├──▶ kustomize ──────────────────────────┼──▶ tools ──▶ screenshots
+       └──▶ test (Python 3.10, 3.12, 3.13) ─────┘
+```
+
+| Job | What it checks |
+|---|---|
+| `lint` | `make lint`: yamllint on `manifests/` |
+| `validate` | `make validate` once per Kubernetes version (built-in kinds strictly, CRDs skipped as described above) |
+| `kustomize` | `kubectl kustomize manifests/` renders offline, and the opt-in files (`05`, `06`) must stay out of the default render |
+| `test` | `make test` on three Python versions |
+| `tools` | `make all`: every tool runs once |
+| `screenshots` | `make screenshots` re-renders `docs/img/` from real tool output and uploads it as an artifact (not compared byte for byte, since Pillow and font versions change the pixels) |
+
+Like the rest of the repo, CI never touches a cluster: the manifests are checked and rendered, not applied. The workflow also has a
+"Run workflow" button (`workflow_dispatch`).
 
 ## License
 
