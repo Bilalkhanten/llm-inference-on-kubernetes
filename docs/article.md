@@ -1,17 +1,3 @@
-<!--
-AUTHOR NOTES (delete before publishing)
-
-1. REAL vs. PLACEHOLDER screenshots
-   - img/ss1..ss4 are real: they are renders of output I actually ran (tools/ folder: kvcalc, captool, routesim, validate).
-   - The seven "📸 YOUR TURN" blocks (P1–P6, with P5a and P5b) need a real cluster. I couldn't reach one from here, so I did NOT mock them up.
-     Run the command, screenshot it, replace the block.
-2. Medium doesn't render Markdown tables, so there are none. Upload images through Medium's editor (it won't pull relative paths).
-3. The routing simulator is a toy model with made-up constants. The article says so. Don't present it as a benchmark of the real endpoint picker.
-4. Version-sensitive: DRA request shape, vLLM metric names, GAIE chart values. The article tells readers how to check each one.
-5. Check Medium's current AI-assistance disclosure rules before you publish.
-6. Replace both REPO_URL_HERE tokens with your GitHub repo URL.
--->
-
 # I Stopped Lying to the Kubernetes Scheduler About My GPUs 🎮⚡
 
 *DRA, KV-cache math, inference-aware routing and autoscaling that respects a 15-minute cold start. Real numbers, real configs, zero hand-waving.*
@@ -32,11 +18,17 @@ That's the trap. Kubernetes happily lets you run a model while every primitive u
 
 This post is how I fix each of those, layer by layer: **capacity math → device allocation → the serving pod → routing → autoscaling → (bonus) letting an AI agent near your cluster without losing sleep.**
 
+Here's the map I'll keep coming back to. Blue is the request path, green is how GPUs get bound to pods, orange is the scaling loop:
+
+![Architecture: request path, device allocation and scaling loop](img/fig1-architecture.png)
+
+*Figure 1. Three loops around one set of vLLM replicas. Each section below zooms into one of them.*
+
 It's written for people who already run prod clusters. I'll skip "what is a Pod" and spend words where the defaults hurt. 🩹
 
 **Stack:** Kubernetes ≥ 1.34 (DRA is GA there), NVIDIA's DRA driver, vLLM, Gateway API Inference Extension (GA since Sept 2025), KEDA, Prometheus.
 
-**A note on the screenshots** 📸: I'm not going to paste fake `kubectl` output. The four terminal screenshots below are real output from tools I wrote for this post (a KV calculator, a capacity planner, a routing simulator and an offline schema validator), all in the repo. The ones that need a live GPU cluster are marked **📸 YOUR TURN** so you can drop in your own.
+**A note on the screenshots** 📸: every terminal screenshot below is real output from tools I wrote for this post (a KV calculator, a capacity planner, a routing simulator and an offline schema validator), all in the [repo](https://github.com/Bilalkhanten/llm-inference-on-kubernetes). I don't paste `kubectl` output I didn't capture, and the manifests are schema-validated offline rather than load-tested on a live cluster, so treat them as a carefully checked starting point.
 
 ---
 
@@ -64,7 +56,13 @@ Things that jumped out at me:
 - 💾 **fp8 KV cache doubles the sequence counts** (compare the last two columns). It's one of the cheapest capacity levers you have, if your quality eval tolerates it.
 - 🚫 **405B at TP=8 on 80 GiB cards doesn't fit in bf16** (94 GiB of weights per GPU). The calculator says so instead of hallucinating a number.
 
-Caveat, because I like being honest: the 3 GiB overhead is an assumption and real engines differ. Treat this as a sizing model, then **verify against what the engine reports at boot** (that's Screenshot P3 below).
+Same numbers as a picture, with the fp8 option next to bf16:
+
+![KV-cache capacity chart](img/fig2-kv-capacity.png)
+
+*Figure 2. Concurrent 8k-token sequences per replica. Generated from the calculator in the repo (`make figures`).*
+
+Caveat, because I like being honest: the 3 GiB overhead is an assumption and real engines differ. Treat this as a sizing model, then **verify against what the engine reports at boot** (more on that in Layer 2).
 
 The takeaway I internalised: **your concurrency ceiling is `KV token budget ÷ average live context`**, so `--max-model-len` set to what the product *needs* rather than what the model *supports* is basically a free capacity knob.
 
@@ -83,8 +81,6 @@ kubectl get deviceclass
 kubectl get resourceslices -o wide
 kubectl get resourceslice <name> -o yaml | less
 ```
-
-> 📸 **YOUR TURN: Screenshot P1.** `kubectl get resourceslices -o wide` next to the YAML of one slice. Frame the per-device `capacity` (memory) and `attributes` (product, architecture, anything topology-ish). That's the exact data your CEL expressions run against.
 
 Here's the single-GPU, big-memory claim I use for 8B-class replicas, plus a two-GPU claim for a TP=2 replica:
 
@@ -146,8 +142,6 @@ kubectl -n inference get resourceclaim
 kubectl -n inference describe resourceclaim <generated-name>
 ```
 
-> 📸 **YOUR TURN: Screenshot P2.** `describe resourceclaim` for a running pod. Frame **Allocation → Devices → Results** and **Reserved For**, which ties the claim back to the pod.
-
 ⚠️ **Don't double-advertise GPUs.** If a node pool runs both the legacy device plugin *and* the DRA driver against the same cards, you've got two allocators with two views of reality. Pick one per node pool and make the migration an explicit, labelled cutover.
 
 ---
@@ -194,7 +188,7 @@ The lines that earned their keep:
 
 - 🎚️ **`--gpu-memory-utilization` is a capacity decision, not a safety margin.** It sets how much device memory the engine grabs up front; whatever's left after weights and activations becomes KV cache. It feeds directly into the table from Step 0.
 - ⚖️ **`--max-num-seqs` / `--max-num-batched-tokens` shape your latency curve.** Bigger batches buy throughput and cost tail latency, because prefill (compute-bound) and decode (memory-bandwidth-bound) share the same engine step. Tune against *replayed real traffic*, not a fixed-length synthetic prompt. Recent vLLM versions use chunked prefill to soften that interference; confirm the default on your version.
-- 🩺 **Size `startupProbe` for the *cold* path.** If you derive it from a warm restart on a node with a cached image, your first scale-up on a fresh node crash-loops and you blame the autoscaler for an evening. Ask me how I know. (Okay, ask *the next person*; I learned this one from the arithmetic, not the outage.)
+- 🩺 **Size `startupProbe` for the *cold* path.** If you derive it from a warm restart on a node with a cached image, your first scale-up on a fresh node crash-loops and you blame the autoscaler for an evening. I'd rather you learn that from the arithmetic than from an outage.
 - 💽 **Weights are infrastructure.** Pulling them from object storage on every cold start couples your scale-up latency to someone else's bandwidth. I mount a pre-populated read-only volume or node-local cache. Mounting an OCI artifact as a volume is attractive for this (reuses your registry and its caching), but check the feature-gate state on your version before designing around it.
 - 🧯 **Shutdown ordering matters.** The `preStop` sleep gives the endpoint picker time to stop sending new requests *before* the process starts draining. Otherwise the first thing a terminating pod receives is a fresh 2,000-token generation that's about to be cut off.
 - 🧠 **`/dev/shm` isn't optional** for multi-process / tensor-parallel setups; the default 64 MiB will bite you.
@@ -206,7 +200,7 @@ kubectl -n inference logs deploy/vllm-llama -c vllm \
   | grep -Ei "kv cache|cuda graph|max concurrency|model loading"
 ```
 
-> 📸 **YOUR TURN: Screenshot P3.** The startup lines reporting model load time, **KV cache size in tokens**, and estimated max concurrency at your `max-model-len`. Put it right under Screenshot 1 in your post and compare. If the engine's token count is wildly different from the calculator's, one of your assumptions (overhead, dtype, model config) is wrong, and that's a *finding*, not a failure.
+If the token count in those logs is wildly different from the calculator's, one of your assumptions (overhead, dtype, model config) is wrong. That's a finding, not a failure.
 
 ---
 
@@ -257,8 +251,6 @@ spec:
 
 You normally install the pool and EPP via the upstream Helm chart. The values schema moves between releases, so read it first: `helm show values oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool --version <pin>`. You also need a gateway implementation that supports `InferencePool` and calls the EPP; check the upstream implementations list before picking one.
 
-> 📸 **YOUR TURN: Screenshot P4.** `kubectl -n inference get inferencepool,httproute` (both accepted) next to `kubectl -n inference logs deploy/llama-pool-epp --tail=50` after a few requests, so the endpoint-selection decisions are visible.
-
 ### 🔬 But does smart routing actually help? I built a toy to find out
 
 Rather than just assert "prefix-aware routing is good", I wrote a small discrete-event simulator: 8 replicas × 32 slots, 200 shared 3,000-token prefixes with Zipf popularity, a per-replica LRU prefix cache that can hold 40 prefixes, and **stale metrics** (the router sees queue depths refreshed every 250 ms, like a scraped `/metrics`).
@@ -282,6 +274,12 @@ Five policies: `random`, `round-robin`, `least-queue`, `prefix-hash` (sticky has
 - 🔥 `prefix-hash` falls off a cliff (p95 **464 s**). One replica owns the hottest prefix and gets buried while the rest idle. (Its "28% slot util" is deflated for the same reason: the run's wall-clock is dominated by that one replica draining.)
 - 🤝 Here even `random`, `round-robin` and `least-queue` already hit ~91%, because the hot prefixes end up cached on all 8 replicas. Cache-awareness has little left to win, and plain `least-queue` (p99 2.10 s) beats `scored` (3.54 s).
 
+Both scenarios in one chart (bars capped at 10 s, off-scale values written out):
+
+![TTFT p50 and p99 by routing policy](img/fig3-routing-latency.png)
+
+*Figure 3. Median and tail time-to-first-token by routing policy. Toy simulator, assumed constants; read the shapes, not the seconds.*
+
 I also ran it at 95 req/s, where every policy except `prefix-hash` collapsed into 13 to 16 s median TTFT. **Routing redistributes capacity; it can't create it.**
 
 What I took from this:
@@ -290,6 +288,14 @@ What I took from this:
 2. The payoff depends on **working-set size vs. per-replica cache**. If the hot set fits everywhere, queue-aware routing is enough; if the working set only fits *across* the fleet, affinity wins big.
 3. **Metric staleness is a first-class parameter.** My main runs use 250 ms-old queue depths. I reran scenario A with `--stale 2.0` (2-second-old metrics): `least-queue` went from a 0.48 s to a **5.74 s** median TTFT, *worse than blind round-robin (0.47 s)*, because every request in that window sees the same "emptiest" replica and herds onto it. `scored` degraded too (0.07 s → 1.84 s), though it kept its cache-hit advantage (91% vs 61%). Fresh metrics matter more than a clever policy.
 4. The EPP is now a **hard dependency in your request path**. Run more than one replica, decide deliberately between fail-open (fall back to round-robin) and fail-closed on the ext-proc filter, and alert on EPP latency. A smart router that's down is worse than a dumb one that's up. 🫠
+
+The staleness experiment as a chart (scenario A, 80 req/s), and the raw run behind the 2-second point:
+
+![p50 TTFT versus metric staleness](img/fig4-staleness.png)
+
+*Figure 4. Same traffic, same replicas: only the age of the queue-depth snapshot changes.*
+
+![Routing simulator run with 2-second-old metrics](img/ss5-stale-metrics.png)
 
 ---
 
@@ -306,8 +312,6 @@ kubectl -n inference port-forward deploy/vllm-llama 8000:8000 &
 curl -s localhost:8000/metrics | grep -E "^vllm:(num_requests|.*cache_usage)"
 ```
 
-> 📸 **YOUR TURN: Screenshot P5a.** That grep, so readers see the exact metric names on *your* version.
-
 ### ⏳ The uncomfortable arithmetic: Little's law vs. your cold start
 
 In-flight requests `N = λ × W` (arrival rate × time in system). So at 60 req/s with a 6 s mean end-to-end time you're carrying **360 concurrent sequences**; at ~38 usable sequences per replica (54 KV-bound × 70% target occupancy) that's **10 replicas** in steady state.
@@ -317,6 +321,12 @@ The real question is what happens when traffic *ramps* while a new replica spend
 ![Little's law capacity and cold-start headroom](img/ss2-capacity-headroom.png)
 
 If traffic can grow 20 req/s per minute and your cold start (schedule + pull + weights + warmup) takes **15 minutes**, you need **48 replicas of pre-provisioned headroom** on top of the 10 you need today. At 25 minutes it's 80. At 1 minute it's 4.
+
+And as a curve, so you can see how steep the price of a slow cold start is:
+
+![Headroom replicas versus cold-start time](img/fig5-coldstart-headroom.png)
+
+*Figure 5. Headroom grows roughly linearly with cold-start minutes. Shave minutes, save replicas.*
 
 That table is why I stopped treating autoscaling as a capacity strategy. **Autoscaling is a smoothing strategy; the floor and the cold start are the capacity strategy.** The levers, in order of how much they move that table:
 
@@ -368,8 +378,6 @@ Two gotchas that cost people days:
 - 🛑 **`cooldownPeriod` is not your scale-down brake.** In KEDA it only governs the wait before scaling to zero. Scale-down smoothing for the 1→N range lives in the HPA `behavior` block, which is why my long stabilisation window is there. Replicas are expensive to bring back, so I scale **up fast, down slow**.
 
 And don't scale to zero unless your cold path is genuinely tolerable. With multi-minute starts, a floor of 2 is cheaper than the incident.
-
-> 📸 **YOUR TURN: Screenshot P5b.** `kubectl -n inference get hpa -w` during a load test, side by side with a Grafana panel overlaying `num_requests_waiting`, KV usage and replica count. Keep the time axis visible so the **scale-up lag** shows. That single image makes the whole Little's-law argument tangible.
 
 ### 🪑 Placeholder pods to keep GPU nodes warm
 
@@ -448,8 +456,6 @@ kubectl auth can-i get secrets -A --as=system:serviceaccount:ops-agents:ai-ops
 kubectl auth can-i delete pods -n inference --as=system:serviceaccount:ops-agents:ai-ops
 ```
 
-> 📸 **YOUR TURN: Screenshot P6.** The three `auth can-i` commands. You want a short read-only list, then `no`, then `no`. Keep the impersonated identity visible.
-
 ---
 
 ## ✅ The pre-prod checklist I'd actually use
@@ -481,14 +487,18 @@ Do that, and the generic machinery goes back to being good at its job. 🚀
 
 Everything in this post (the calculators, the routing simulator, the manifests, the tests and the screenshot pipeline) lives in one repo:
 
-👉 **REPO_URL_HERE**
+👉 **[github.com/Bilalkhanten/llm-inference-on-kubernetes](https://github.com/Bilalkhanten/llm-inference-on-kubernetes)**
 
 ```bash
-git clone REPO_URL_HERE && cd llm-inference-on-kubernetes
+git clone https://github.com/Bilalkhanten/llm-inference-on-kubernetes.git && cd llm-inference-on-kubernetes
 make install
 make all        # kvcalc, capacity planner, routing sim, offline schema validation
-make test       # 12 tests, no GPU or cluster needed
+make test       # 13 tests, no GPU or cluster needed
 ```
+
+Lint and the test suite pass locally and on every push (CI runs the same targets):
+
+![make lint test output](img/ss6-lint-and-tests.png)
 
 Swap in your own model dimensions, latencies and traffic. The *shape* of the answers is what matters; the specific numbers are mine.
 

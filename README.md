@@ -20,20 +20,23 @@ Companion code for the article **"I Stopped Lying to the Kubernetes Scheduler Ab
 | `tools/captool.py` | Little's-law replica sizing plus the headroom you need for a given cold-start time |
 | `tools/routesim.py` | Toy discrete-event simulator comparing routing policies (random, round-robin, least-queue, prefix-hash, scored) |
 | `tools/validate.py` | Offline schema validation of `manifests/` against Kubernetes OpenAPI schemas, no cluster needed |
-| `tools/render.py`, `tools/make_screenshots.sh` | Render captured tool output into the terminal-style PNGs in `docs/img/` |
+| `tools/render.py`, `tools/make_screenshots.sh` | Render captured tool output into the terminal-style PNGs in `docs/img/ss*.png` |
+| `tools/make_figures.py` | Draws the charts and architecture diagram (`docs/img/fig*.png`) from the tools' own numbers |
+| `tools/make_cover.py` | Draws the article cover and the GitHub social preview from `kvcalc` numbers (`docs/img/cover-*.png`) |
 | `manifests/` | DRA claims, vLLM Deployment, InferencePool + HTTPRoute, KEDA ScaledObject, GPU headroom pods, read-only agent RBAC |
 | `tests/` | pytest suite (runs without a cluster or a GPU) |
-| `docs/article-draft.md` | The article draft that goes with this repo |
+| `docs/article.md` | The article that goes with this repo (images in `docs/img/`) |
 
 ## Quickstart
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-make install        # pyyaml, kubernetes-validate, yamllint, pillow, pytest
+make install        # pyyaml, kubernetes-validate, yamllint, pillow, matplotlib, pytest
 make all            # kvcalc, capacity, routesim, validate
-make test           # 12 tests
+make test           # 14 tests
 make lint           # yamllint on manifests/
-make screenshots    # regenerate docs/img/*.png from real tool output
+make screenshots    # regenerate docs/img/ss*.png from real tool output
+make figures        # regenerate docs/img/fig*.png (charts + architecture diagram)
 ```
 
 Everything is plain Python 3 with no GPU and no cluster required.
@@ -125,9 +128,9 @@ kubectl apply -k manifests/
 `.github/workflows/ci.yml` runs on every push and pull request as a dependency graph (arrows are `needs:`):
 
 ```
-lint ──┬──▶ validate (Kubernetes 1.34 - 1.37) ──┐
-       ├──▶ kustomize ──────────────────────────┼──▶ tools ──▶ screenshots
-       └──▶ test (Python 3.10, 3.12, 3.13) ─────┘
+lint ──┬──▶ validate (Kubernetes 1.34 - 1.37) ──┐        ┌──▶ screenshots
+       ├──▶ kustomize ──────────────────────────┼──▶ tools┤
+       └──▶ test (Python 3.10, 3.12, 3.13) ─────┘        └──▶ figures
 ```
 
 | Job | What it checks |
@@ -137,7 +140,8 @@ lint ──┬──▶ validate (Kubernetes 1.34 - 1.37) ──┐
 | `kustomize` | `kubectl kustomize manifests/` renders offline, and the opt-in files (`05`, `06`) must stay out of the default render |
 | `test` | `make test` on three Python versions |
 | `tools` | `make all`: every tool runs once |
-| `screenshots` | `make screenshots` re-renders `docs/img/` from real tool output and uploads it as an artifact (not compared byte for byte, since Pillow and font versions change the pixels) |
+| `screenshots` | `make screenshots` re-renders `docs/img/ss*.png` from real tool output and uploads it as an artifact (not compared byte for byte, since Pillow and font versions change the pixels) |
+| `figures` | `make figures` and `make covers` redraw the charts, architecture diagram and article covers from the tools' own numbers and upload them |
 
 Like the rest of the repo, CI never touches a cluster: the manifests are checked and rendered, not applied. The workflow also has a
 "Run workflow" button (`workflow_dispatch`).

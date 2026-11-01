@@ -37,7 +37,7 @@ def color(line):
         return CYAN, True
     if line.startswith("==") or line.startswith("Little"):
         return PINK, True
-    if re.search(r"\bOK\b", line):
+    if re.search(r"\bOK\b|\bpassed\b", line):
         return GREEN, False
     if re.search(r"\bFAIL\b", line):
         return RED, False

@@ -4,6 +4,8 @@ import pytest
 
 import captool
 import kvcalc
+import make_cover
+import make_figures
 import render
 import routesim
 import validate
@@ -91,3 +93,19 @@ def test_render_writes_a_png(tmp_path):
     except SystemExit:
         pytest.skip("no monospace font available")
     assert out.stat().st_size > 1000
+
+
+# ---- figures ----------------------------------------------------------------
+def test_figure_data_comes_from_the_tools():
+    rows = make_figures.kv_data()
+    by = {(n, tp): (bf, f8) for n, tp, bf, f8 in rows}
+    assert by[("Llama-3.1-70B", 1)] == (None, None)
+    assert by[("Llama-3.1-70B", 2)][0] == pytest.approx(2.6, abs=0.05)
+    assert by[("Llama-3.1-8B", 1)][1] == pytest.approx(2 * by[("Llama-3.1-8B", 1)][0])
+
+
+# ---- cover ------------------------------------------------------------------
+def test_cover_squares_add_up_to_the_whole_gpu_and_match_kvcalc():
+    weights, overhead, kv, reserved, conc = make_cover.numbers()
+    assert weights + overhead + kv + reserved == 80
+    assert kv == 3 and conc == pytest.approx(2.6, abs=0.05)

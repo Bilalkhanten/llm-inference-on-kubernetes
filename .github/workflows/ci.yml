@@ -2,17 +2,18 @@ name: CI
 
 # Pipeline graph (arrows are `needs:`):
 #
-#   lint ──┬──▶ validate (Kubernetes 1.34 - 1.37) ──┐
-#          ├──▶ kustomize ──────────────────────────┼──▶ tools ──▶ screenshots
-#          └──▶ test (Python 3.10, 3.12, 3.13) ─────┘
+#   lint ──┬──▶ validate (Kubernetes 1.34 - 1.37) ──┐        ┌──▶ screenshots
+#          ├──▶ kustomize ──────────────────────────┼──▶ tools┤
+#          └──▶ test (Python 3.10, 3.12, 3.13) ─────┘        └──▶ figures
 #
 # lint         yamllint on manifests/                                   (make lint)
 # validate     offline schema validation per Kubernetes version         (make validate)
 # kustomize    `kubectl kustomize manifests/` renders offline; the opt-in files (05, 06) must stay out
 # test         pytest, no cluster and no GPU needed                     (make test)
 # tools        runs every tool once: kvcalc, captool, routesim, validate (make all)
-# screenshots  re-renders docs/img/*.png from real tool output (uploaded; not compared byte for byte, since
+# screenshots  re-renders docs/img/ss*.png from real tool output (uploaded; not compared byte for byte, since
 #              Pillow and font versions change the pixels)
+# figures      re-draws the charts, architecture diagram and article covers from the tools' own numbers (uploaded)
 #
 # Nothing here talks to a cluster. The manifests are checked against schemas and rendered, never applied.
 # "Run workflow" on the Actions tab starts the pipeline by hand (workflow_dispatch).
@@ -122,14 +123,42 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Re-render docs/img from real tool output
+      - name: Re-render docs/img/ss*.png from real tool output
         run: |
           make screenshots
-          test "$(ls docs/img/*.png | wc -l)" -eq 5
+          test "$(ls docs/img/ss*.png | wc -l)" -eq 7
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
           path: |
-            docs/img/*.png
+            docs/img/ss*.png
             out/*.txt
+          retention-days: 14
+
+  figures:
+    name: figures
+    needs: [tools]
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Charts, architecture diagram and article covers from the tools' own numbers
+        run: |
+          make figures
+          make covers
+          test "$(ls docs/img/fig*.png | wc -l)" -eq 5
+          test "$(ls docs/img/cover-*.png docs/img/github-social-*.png | wc -l)" -eq 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: figures
+          path: |
+            docs/img/fig*.png
+            docs/img/cover-*.png
+            docs/img/github-social-*.png
           retention-days: 14

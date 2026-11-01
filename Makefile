@@ -1,7 +1,7 @@
 PY ?= python3
 K8S_VERSION ?= 1.34
 
-.PHONY: help install all kvcalc capacity routesim validate lint test screenshots clean
+.PHONY: help install all kvcalc capacity routesim validate lint test screenshots figures covers clean
 
 help:
 	@echo "make install      pip install -r requirements.txt"
@@ -9,7 +9,8 @@ help:
 	@echo "make validate     offline schema-validate manifests (K8S_VERSION=$(K8S_VERSION))"
 	@echo "make lint         yamllint the manifests"
 	@echo "make test         pytest"
-	@echo "make screenshots  regenerate docs/img/*.png from real tool output"
+	@echo "make screenshots  regenerate docs/img/ss*.png from real tool output"
+	@echo "make figures      regenerate docs/img/fig*.png (charts + architecture diagram)"
 
 install:
 	$(PY) -m pip install -r requirements.txt
@@ -36,6 +37,12 @@ test:
 
 screenshots:
 	bash tools/make_screenshots.sh
+
+figures:
+	$(PY) tools/make_figures.py
+
+covers:
+	$(PY) tools/make_cover.py
 
 clean:
 	rm -rf out .pytest_cache tools/__pycache__ tests/__pycache__
