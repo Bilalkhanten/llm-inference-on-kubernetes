@@ -1,0 +1,39 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm-llama
+  namespace: inference
+spec:
+  scaleTargetRef:
+    name: vllm-llama
+  minReplicaCount: 2
+  maxReplicaCount: 12
+  pollingInterval: 15
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+          - type: Pods
+            value: 2
+            periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 900
+          policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 300
+  triggers:
+  - type: prometheus
+    metricType: AverageValue
+    metadata:
+      serverAddress: http://prometheus-operated.monitoring.svc:9090
+      query: sum(vllm:num_requests_waiting{namespace="inference"})
+      threshold: "3"
+  - type: prometheus
+    metricType: AverageValue
+    metadata:
+      serverAddress: http://prometheus-operated.monitoring.svc:9090
+      query: sum(vllm:gpu_cache_usage_perc{namespace="inference"})
+      threshold: "0.75"

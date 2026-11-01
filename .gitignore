@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- project-specific ---
+# raw tool output captured by tools/make_screenshots.sh
+out/
+.DS_Store

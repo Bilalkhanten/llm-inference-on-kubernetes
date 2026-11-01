@@ -1,0 +1,15 @@
+# Applies everything except the optional placeholder pods and the agent RBAC.
+# Prerequisites (see README): DRA driver, GAIE CRDs + a supporting gateway, KEDA, Prometheus,
+# Secret `hf-token` and PVC `model-cache` in the `inference` namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- 00-namespaces.yaml
+- 01-dra-claims.yaml
+- 02-vllm-deployment.yaml
+- 03-inferencepool-route.yaml
+- 04-keda-scaledobject.yaml
+# opt in when you have validated preemption of DRA-claimed pods on your cluster:
+# - 05-gpu-headroom.yaml
+# opt in when you want the read-only AI-agent identity:
+# - 06-ai-ops-rbac.yaml

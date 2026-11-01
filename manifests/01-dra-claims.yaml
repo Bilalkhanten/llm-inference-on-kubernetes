@@ -1,0 +1,36 @@
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: llm-gpu-70g
+  namespace: inference
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          selectors:
+          - cel:
+              expression: |
+                device.capacity['gpu.nvidia.com'].memory
+                  .compareTo(quantity('70Gi')) >= 0
+---
+# two GPUs for a TP=2 replica; the attribute name must come from YOUR ResourceSlice
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: llm-gpu-tp2
+  namespace: inference
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpus
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 2
+      constraints:
+      - requests: ["gpus"]
+        matchAttribute: example.com/interconnect-domain   # placeholder, see ResourceSlice

@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-llama
+  namespace: inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vllm-llama
+  template:
+    metadata:
+      labels:
+        app: vllm-llama
+    spec:
+      terminationGracePeriodSeconds: 180
+      resourceClaims:
+      - name: gpu
+        resourceClaimTemplateName: llm-gpu-70g
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai@sha256:0000000000000000000000000000000000000000000000000000000000000000  # pin your own digest
+        args:
+        - --model=meta-llama/Llama-3.1-8B-Instruct
+        - --served-model-name=llama-3.1-8b
+        - --max-model-len=16384
+        - --gpu-memory-utilization=0.90
+        - --max-num-seqs=128
+        - --max-num-batched-tokens=8192
+        - --enable-prefix-caching
+        - --port=8000
+        env:
+        - name: HF_HOME
+          value: /models/hf
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+        ports:
+        - name: http
+          containerPort: 8000
+        resources:
+          claims:
+          - name: gpu
+          requests:
+            cpu: "8"
+            memory: 48Gi
+          limits:
+            memory: 48Gi
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 10
+          failureThreshold: 120
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 5
+        lifecycle:
+          preStop:
+            sleep:
+              seconds: 30
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        - name: dshm
+          mountPath: /dev/shm
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: model-cache
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
